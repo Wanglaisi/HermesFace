@@ -65,6 +65,19 @@ touch /opt/data/logs/app.log
 ENTRYPOINT_END=$(date +%s)
 echo "[TIMER] Entrypoint (before sync_hf.py): $((ENTRYPOINT_END - BOOT_START))s"
 
-# ── Start Hermes via sync_hf.py (handles persistence + process management)
-echo "[entrypoint] Starting Hermes Agent via sync_hf.py..."
-exec python3 -u /opt/data/scripts/sync_hf.py
+# ── CRITICAL FIX: Start Hermes even if sync fails ────────────────────────
+echo "[entrypoint] Attempting Dataset sync via sync_hf.py..."
+python3 -u /opt/data/scripts/sync_hf.py || {
+  echo "⚠️  [entrypoint] Dataset sync failed (exit code $?), but continuing..."
+  echo "    → Hermes Agent will start without initial sync"
+}
+
+# If sync_hf.py didn't exec to Hermes (because it failed), start Hermes directly
+if [ -f "$INSTALL_DIR/run_agent.py" ]; then
+  echo "[entrypoint] Starting Hermes Agent directly..."
+  cd "$HERMES_HOME"
+  exec python3 -u "$INSTALL_DIR/run_agent.py"
+else
+  echo "[entrypoint] ERROR: run_agent.py not found, cannot start Hermes"
+  exit 1
+fi
