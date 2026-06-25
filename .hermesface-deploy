@@ -1,0 +1,23 @@
+# HermesFace Deployment Record
+
+## Cloudflare Worker (Telegram Proxy)
+- Worker Name: tg-proxy-hm
+- Worker URL: https://tg-proxy-hm.hm-22c.workers.dev
+- Purpose: Bypass HF Spaces outbound firewall for Telegram Bot API
+
+## Deployment Date
+2026-06-25
+
+## HF Space Configuration
+Set these secrets in HuggingFace Space Settings → Repository secrets:
+
+1. HF_TOKEN (required) - HuggingFace token with write permission
+2. AUTO_CREATE_DATASET=true (recommended) - Auto-create backup dataset
+3. OPENROUTER_API_KEY (recommended) - OpenRouter API key for 200+ models
+4. TELEGRAM_BOT_TOKEN (optional) - Your Telegram bot token from @BotFather
+5. TELEGRAM_API_BASE=https://tg-proxy-hm.hm-22c.workers.dev (optional) - Use CF proxy for Telegram
+
+## Next Steps
+1. Wait for GitHub Actions to sync code to HF Space
+2. Configure secrets in HF Space settings
+3. Access dashboard at https://nohke-hm.hf.space (after deployment completes)
