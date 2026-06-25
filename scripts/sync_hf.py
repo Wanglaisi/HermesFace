@@ -240,6 +240,12 @@ class HermesFullSync:
                     "__pycache__",  # Python cache
                     "scripts/*",    # HermesFace scripts — from git, not data
                     "assets/*",     # Static assets — from git, not data
+                    ".cache/*",     # HuggingFace cache etc
+                    ".cache",
+                    ".venv/*",      # Local venv if any
+                    ".venv",
+                    ".git/*",
+                    ".git",
                 ],
             )
             print(f"[SYNC] Upload completed at {datetime.now().isoformat()}")
@@ -297,7 +303,9 @@ class HermesFullSync:
                         env_lines.append(f"{key}={val}")
                 if env_lines:
                     with open(env_path, "w") as f:
-                        f.write("\n".join(env_lines) + "\n")
+                        f.write("
+".join(env_lines) + "
+")
                     print(f"[SYNC] Created .env with {len(env_lines)} keys")
 
         if not soul_path.exists():
@@ -307,7 +315,10 @@ class HermesFullSync:
                 print("[SYNC] Created SOUL.md from Hermes template")
             else:
                 with open(soul_path, "w") as f:
-                    f.write(f"# {AGENT_NAME}\n\nI am {AGENT_NAME}, a self-improving AI assistant powered by Hermes Agent.\n")
+                    f.write(f"# {AGENT_NAME}
+
+I am {AGENT_NAME}, a self-improving AI assistant powered by Hermes Agent.
+")
                 print("[SYNC] Created default SOUL.md")
 
     def _debug_list_files(self):
@@ -341,7 +352,7 @@ class HermesFullSync:
             code = ws_path.read_text()
             changed = False
 
-            old_cors = 'allow_origin_regex=r"^https?://(localhost|127\\.0\\.0\\.1)(:\\d+)?$"'
+            old_cors = 'allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"'
             new_cors = 'allow_origins=["*"]'
             if old_cors in code:
                 code = code.replace(old_cors, new_cors)
@@ -356,7 +367,7 @@ class HermesFullSync:
                     print("[SYNC] Relaxed X-Frame-Options for HF Spaces")
 
             # Relax CSP frame-ancestors if present.
-            csp_old = 'frame-ancestors \'none\''
+            csp_old = "frame-ancestors \'none\'"
             csp_new = "frame-ancestors 'self' https://huggingface.co https://*.hf.space"
             if csp_old in code:
                 code = code.replace(csp_old, csp_new)
@@ -432,6 +443,10 @@ class HermesFullSync:
         env.pop("API_SERVER_ENABLED", None)
         env.pop("API_SERVER_PORT", None)
 
+        # Configure an auth provider for non-loopback dashboard binding
+        env["HERMES_DASHBOARD_BASIC_AUTH_USERNAME"] = "admin"
+        env["HERMES_DASHBOARD_BASIC_AUTH_PASSWORD"] = os.environ.get("GATEWAY_TOKEN", "admin123456")
+
         # ── 1. Patch web dashboard CORS for HF Spaces ────────────────
         self._patch_web_server_cors()
 
@@ -486,7 +501,8 @@ def main():
 
         # Signal handler
         def handle_signal(sig, frame):
-            print(f"\n[SYNC] Signal {sig} received. Shutting down...")
+            print(f"
+[SYNC] Signal {sig} received. Shutting down...")
             stop_event.set()
             t.join(timeout=10)
             # Stop gateway
