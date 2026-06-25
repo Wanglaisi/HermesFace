@@ -13,4 +13,4 @@ jobs:
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          git push https://wanglaisi:$HF_TOKEN@huggingface.co/spaces/wanglaisi/hermesface main --force
+          git push https://nohke:$HF_TOKEN@huggingface.co/spaces/nohke/herface main --force
