@@ -9,6 +9,7 @@ Hermes Agent HF Spaces Persistence — Full Directory Sync
 config 策略:
 - model:     不在脚本写死,交给面板 / 持久化的 config.yaml
 - telegram:  base_url 每次启动强制 merge(对齐 CLOUDFLARE_PROXY_URL)
+- dashboard: basic-auth 通过官方 env 注入(新版 Hermes 强制要求)
 """
 
 import os
@@ -313,7 +314,9 @@ class HermesFullSync:
                         env_lines.append(f"{key}={val}")
                 if env_lines:
                     with open(env_path, "w") as f:
-                        f.write("\n".join(env_lines) + "\n")
+                        f.write("
+".join(env_lines) + "
+")
                     print(f"[SYNC] Created .env with {len(env_lines)} keys")
 
         # 4. SOUL.md 兜底
@@ -324,8 +327,11 @@ class HermesFullSync:
                 print("[SYNC] Created SOUL.md from Hermes template")
             else:
                 with open(soul_path, "w") as f:
-                    f.write(f"# {AGENT_NAME}\n\nI am {AGENT_NAME}, "
-                            f"a self-improving AI assistant powered by Hermes Agent.\n")
+                    f.write(f"# {AGENT_NAME}
+
+I am {AGENT_NAME}, "
+                            f"a self-improving AI assistant powered by Hermes Agent.
+")
                 print("[SYNC] Created default SOUL.md")
 
     def _debug_list_files(self):
@@ -437,10 +443,28 @@ class HermesFullSync:
         env.pop("API_SERVER_ENABLED", None)
         env.pop("API_SERVER_PORT", None)
 
+        # ── Dashboard basic-auth(新版 Hermes 强制要求,否则拒绝绑定 0.0.0.0)──
+        # 明文密码由 Hermes 在加载时内存哈希,无需自己算 scrypt。
+        # SECRET 必须固定,否则每次重启都掉登录。
+        _dash_pass = (os.environ.get("DASHBOARD_PASSWORD")
+                      or os.environ.get("GATEWAY_TOKEN", ""))
+        if _dash_pass:
+            env.setdefault("HERMES_DASHBOARD_BASIC_AUTH_USERNAME",
+                           os.environ.get("DASHBOARD_USERNAME", "admin"))
+            env["HERMES_DASHBOARD_BASIC_AUTH_PASSWORD"] = _dash_pass
+            env.setdefault("HERMES_DASHBOARD_BASIC_AUTH_SECRET",
+                           os.environ.get("DASHBOARD_SECRET", _dash_pass))
+            print("[SYNC] Dashboard basic-auth enabled via env "
+                  f"(user={env['HERMES_DASHBOARD_BASIC_AUTH_USERNAME']})")
+        else:
+            print("[SYNC] WARNING: no GATEWAY_TOKEN/DASHBOARD_PASSWORD set — "
+                  "dashboard will refuse to bind 0.0.0.0 and exit!")
+
         self._patch_web_server_cors()
 
-        dashboard_cmd = [hermes_bin, "dashboard", "--host", "0.0.0.0", "--port", "7860",
-                         "--no-open", "--insecure"]
+        # 注意:已删除 --insecure(它在新版会触发 SPA 无限重定向 bug #34398)
+        dashboard_cmd = [hermes_bin, "dashboard", "--host", "0.0.0.0",
+                         "--port", "7860", "--no-open"]
         print("[SYNC] Starting web dashboard on port 7860...")
         dashboard_proc = self._start_process(
             dashboard_cmd, "Dashboard", env, log_dir / "dashboard.log"
@@ -482,7 +506,8 @@ def main():
         print(f"[TIMER] Total startup: {time.time() - t_main_start:.1f}s")
 
         def handle_signal(sig, frame):
-            print(f"\n[SYNC] Signal {sig} received. Shutting down...")
+            print(f"
+[SYNC] Signal {sig} received. Shutting down...")
             stop_event.set()
             t.join(timeout=10)
             if getattr(sync, "gateway_proc", None):
