@@ -307,9 +307,8 @@ class HermesFullSync:
                         env_lines.append(f"{key}={val}")
                 if env_lines:
                     with open(env_path, "w") as f:
-                        f.write("
-".join(env_lines) + "
-")
+                        f.write("\n".join(env_lines) + "\n")
+
                     print(f"[SYNC] Created .env with {len(env_lines)} keys")
 
         if not soul_path.exists():
@@ -319,10 +318,7 @@ class HermesFullSync:
                 print("[SYNC] Created SOUL.md from Hermes template")
             else:
                 with open(soul_path, "w") as f:
-                    f.write(f"# {AGENT_NAME}
-
-I am {AGENT_NAME}, a self-improving AI assistant powered by Hermes Agent.
-")
+                    f.write(f"# {AGENT_NAME}\n\nI am {AGENT_NAME}, a self-improving AI assistant powered by Hermes Agent.\n") 
                 print("[SYNC] Created default SOUL.md")
 
     def _debug_list_files(self):
