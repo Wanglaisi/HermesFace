@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-"Hermes代理HF空间持久性 - 完整目录同步"
+Hermes Agent HF Spaces Persistence — Full Directory Sync
 =========================================================
 
 Simplified persistence: upload/download the entire /opt/data directory
 as-is to/from a Hugging Face Dataset repo.
 
-- Startup:  snapshot_download  →  /opt/data
-- Periodic: upload_folder      →  dataset hermes_data/
-- Shutdown: final upload_folder →  dataset hermes_data/
+- Startup:  snapshot_download  ->  /opt/data
+- Periodic: upload_folder      ->  dataset hermes_data/
+- Shutdown: final upload_folder ->  dataset hermes_data/
 """
 
 import os
@@ -22,6 +22,7 @@ import tempfile
 import traceback
 from pathlib import Path
 from datetime import datetime
+
 # Set timeout BEFORE importing huggingface_hub
 os.environ.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", "300")
 os.environ.setdefault("HF_HUB_UPLOAD_TIMEOUT", "600")
@@ -42,22 +43,25 @@ class TeeLogger:
     def __init__(self, filename, stream):
         self.stream = stream
         self.file = open(filename, "a", encoding="utf-8")
+
     def write(self, message):
         self.stream.write(message)
         self.file.write(message)
         self.flush()
+
     def flush(self):
         self.stream.flush()
         self.file.flush()
+
     def fileno(self):
         return self.stream.fileno()
 
 # ── Configuration ───────────────────────────────────────────────────────────
 
-HF_TOKEN      = os.environ.get("HF_TOKEN")
-HERMES_DATA   = Path("/opt/data")
-APP_DIR       = Path("/opt/hermes")
-DATASET_PATH  = "hermes_data"
+HF_TOKEN     = os.environ.get("HF_TOKEN")
+HERMES_DATA  = Path("/opt/data")
+APP_DIR      = Path("/opt/hermes")
+DATASET_PATH = "hermes_data"
 
 AGENT_NAME = os.environ.get("AGENT_NAME", "HermesFace")
 
@@ -101,6 +105,7 @@ class HermesFullSync:
         self.enabled = False
         self.dataset_exists = False
         self.api = None
+        self.gateway_proc = None
 
         if not HF_TOKEN:
             print("[SYNC] WARNING: HF_TOKEN not set. Persistence disabled.")
@@ -144,7 +149,7 @@ class HermesFullSync:
     # ── Restore (startup) ─────────────────────────────────────────────
 
     def load_from_repo(self):
-        """Download from dataset → /opt/data"""
+        """Download from dataset -> /opt/data"""
         if not self.enabled:
             print("[SYNC] Persistence disabled - skipping restore")
             self._ensure_default_config()
@@ -198,7 +203,7 @@ class HermesFullSync:
     # ── Save (periodic + shutdown) ─────────────────────────────────────
 
     def save_to_repo(self):
-        """Upload entire /opt/data directory → dataset (all files, no filtering)"""
+        """Upload entire /opt/data directory -> dataset (all files, with filtering)"""
         if not self.enabled:
             return
         if not HERMES_DATA.exists():
@@ -209,7 +214,7 @@ class HermesFullSync:
             print(f"[SYNC] Dataset {HF_REPO_ID} unavailable - skipping save")
             return
 
-        print(f"[SYNC] Uploading /opt/data → dataset {HF_REPO_ID}/{DATASET_PATH}/ ...")
+        print(f"[SYNC] Uploading /opt/data -> dataset {HF_REPO_ID}/{DATASET_PATH}/ ...")
 
         try:
             total_size = 0
@@ -217,8 +222,11 @@ class HermesFullSync:
             for root, dirs, fls in os.walk(HERMES_DATA):
                 for fn in fls:
                     fp = os.path.join(root, fn)
-                    total_size += os.path.getsize(fp)
-                    file_count += 1
+                    try:
+                        total_size += os.path.getsize(fp)
+                        file_count += 1
+                    except OSError:
+                        pass
             print(f"[SYNC] Uploading: {file_count} files, {total_size} bytes total")
 
             if file_count == 0:
@@ -238,14 +246,16 @@ class HermesFullSync:
                     "*.tmp",        # Temp files
                     "*.pid",        # PID files
                     "__pycache__",  # Python cache
+                    "__pycache__/*",
                     "scripts/*",    # HermesFace scripts — from git, not data
                     "assets/*",     # Static assets — from git, not data
-                    ".cache/*",     # HuggingFace cache etc
-                    ".cache",
-                    ".venv/*",      # Local venv if any
-                    ".venv",
-                    ".git/*",
+                    ".cache",       # HuggingFace / uv cache — HF rejects these paths
+                    ".cache/*",
+                    "**/.cache/*",
+                    ".venv",        # Local venv if any
+                    ".venv/*",
                     ".git",
+                    ".git/*",
                 ],
             )
             print(f"[SYNC] Upload completed at {datetime.now().isoformat()}")
@@ -281,11 +291,11 @@ class HermesFullSync:
                 config = {
                     "agent": {"name": AGENT_NAME},
                     "model": {
-                    "provider": "openrouter",
-                    "default": "deepseek/deepseek-chat-v3.1:free"
-                },
+                        "provider": "openrouter",
+                        "default": "deepseek/deepseek-chat-v3.1:free",
+                    },
                     "server": {"host": "0.0.0.0", "port": 7860},
-                }               
+                }
                 with open(config_path, "w") as f:
                     yaml.dump(config, f, default_flow_style=False)
                 print(f"[SYNC] Created minimal config.yaml (agent={AGENT_NAME}, port=7860)")
@@ -308,7 +318,6 @@ class HermesFullSync:
                 if env_lines:
                     with open(env_path, "w") as f:
                         f.write("\n".join(env_lines) + "\n")
-
                     print(f"[SYNC] Created .env with {len(env_lines)} keys")
 
         if not soul_path.exists():
@@ -318,7 +327,10 @@ class HermesFullSync:
                 print("[SYNC] Created SOUL.md from Hermes template")
             else:
                 with open(soul_path, "w") as f:
-                    f.write(f"# {AGENT_NAME}\n\nI am {AGENT_NAME}, a self-improving AI assistant powered by Hermes Agent.\n") 
+                    f.write(
+                        f"# {AGENT_NAME}\n\n"
+                        f"I am {AGENT_NAME}, a self-improving AI assistant powered by Hermes Agent.\n"
+                    )
                 print("[SYNC] Created default SOUL.md")
 
     def _debug_list_files(self):
@@ -352,7 +364,7 @@ class HermesFullSync:
             code = ws_path.read_text()
             changed = False
 
-            old_cors = 'allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"'
+            old_cors = r'allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"'
             new_cors = 'allow_origins=["*"]'
             if old_cors in code:
                 code = code.replace(old_cors, new_cors)
@@ -367,7 +379,7 @@ class HermesFullSync:
                     print("[SYNC] Relaxed X-Frame-Options for HF Spaces")
 
             # Relax CSP frame-ancestors if present.
-            csp_old = "frame-ancestors \'none\'"
+            csp_old = "frame-ancestors 'none'"
             csp_new = "frame-ancestors 'self' https://huggingface.co https://*.hf.space"
             if csp_old in code:
                 code = code.replace(csp_old, csp_new)
@@ -451,8 +463,6 @@ class HermesFullSync:
         self._patch_web_server_cors()
 
         # ── 2. Start web dashboard on port 7860 (HF Spaces frontend) ─
-        # --insecure: required to bind 0.0.0.0; HF Spaces already sandboxes the
-        # container and Repository Secrets are never exposed to the browser.
         dashboard_cmd = [hermes_bin, "dashboard", "--host", "0.0.0.0", "--port", "7860",
                          "--no-open", "--insecure"]
         print("[SYNC] Starting web dashboard on port 7860...")
@@ -497,16 +507,15 @@ def main():
         t0 = time.time()
         process = sync.run_hermes()
         print(f"[TIMER] run_hermes launch: {time.time() - t0:.1f}s")
-        print(f"[TIMER] Total startup (init → app launched): {time.time() - t_main_start:.1f}s")
+        print(f"[TIMER] Total startup (init -> app launched): {time.time() - t_main_start:.1f}s")
 
         # Signal handler
         def handle_signal(sig, frame):
-            print(f"
-[SYNC] Signal {sig} received. Shutting down...")
+            print(f"\n[SYNC] Signal {sig} received. Shutting down...")
             stop_event.set()
             t.join(timeout=10)
             # Stop gateway
-            if hasattr(sync, 'gateway_proc') and sync.gateway_proc:
+            if getattr(sync, "gateway_proc", None):
                 sync.gateway_proc.terminate()
                 try:
                     sync.gateway_proc.wait(timeout=5)
