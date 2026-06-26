@@ -441,7 +441,9 @@ class HermesFullSync:
         env["GATEWAY_ALLOW_ALL_USERS"] = "true"
         env.pop("API_SERVER_ENABLED", None)
         env.pop("API_SERVER_PORT", None)
-
+# HF Spaces: always disable Telegram FallbackTransport so base_url (CF Worker) works
+        env["HERMES_TELEGRAM_DISABLE_FALLBACK_IPS"] = "true"
+        
         # -- Dashboard basic-auth (required by new Hermes; else refuses 0.0.0.0) --
         # Plaintext password is hashed in-memory by Hermes; no scrypt needed.
         # SECRET must be stable, otherwise every restart logs you out.
