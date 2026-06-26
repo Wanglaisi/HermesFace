@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Hermes Agent HF Spaces Persistence — Full Directory Sync
+"Hermes代理HF空间持久性 - 完整目录同步"
 =========================================================
 
 Simplified persistence: upload/download the entire /opt/data directory
@@ -280,8 +280,12 @@ class HermesFullSync:
                 import yaml
                 config = {
                     "agent": {"name": AGENT_NAME},
+                    "model": {
+                    "provider": "openrouter",
+                    "default": "deepseek/deepseek-chat-v3.1:free"
+                },
                     "server": {"host": "0.0.0.0", "port": 7860},
-                }
+                }               
                 with open(config_path, "w") as f:
                     yaml.dump(config, f, default_flow_style=False)
                 print(f"[SYNC] Created minimal config.yaml (agent={AGENT_NAME}, port=7860)")
