@@ -4,9 +4,9 @@
 
 ### 1. GitHub Repository
 - Fork: `wanglaisi/hermesface` ✓
-- README.md updated with dataset: `nohke/hm-data` ✓
+- README.md updated with dataset: `nomke/hm-data` ✓
 - Workflow configured: `.github/workflows/sync-to-hf.yml` ✓
-- Push target: `https://huggingface.co/spaces/nohke/hm` ✓
+- Push target: `https://huggingface.co/spaces/nomke/hm` ✓
 
 ### 2. Cloudflare Worker (Telegram Proxy)
 - Status: **Deployed** ✓
@@ -15,21 +15,21 @@
 - Usage: Configure as `TELEGRAM_API_BASE_URL` in HF Secrets
 
 ### 3. HuggingFace Space
-- Space name: `nohke/hm` ✓
+- Space name: `nomke/hm` ✓
 - Status: Created (empty, awaiting first push)
 
 ## 🔧 Pending Configuration
 
 ### HuggingFace Space Secrets (Manual Setup Required)
 
-You need to login to HuggingFace as **nohke** account and configure the following secrets at:
-`https://huggingface.co/spaces/nohke/hm/settings`
+You need to login to HuggingFace as **nomke** account and configure the following secrets at:
+`https://huggingface.co/spaces/nomke/hm/settings`
 
 **Required Secrets:**
 
 1. **HF_TOKEN** (Required)
    - Value: Your HuggingFace Write token
-   - Purpose: Auto-create backup dataset `nohke/hm-data`
+   - Purpose: Auto-create backup dataset `nomke/hm-data`
 
 2. **AUTO_CREATE_DATASET** (Required)
    - Value: `true`
@@ -60,7 +60,7 @@ You need to login to HuggingFace as **nohke** account and configure the followin
 - [x] Update README.md dataset field
 - [x] Configure sync workflow
 - [x] Deploy Cloudflare Worker proxy
-- [ ] Login to HF as nohke account
+- [ ] Login to HF as nomke account
 - [ ] Configure HF Space Secrets (see list above)
 - [ ] Verify GitHub→HF sync completes successfully
 - [ ] Verify HF Space builds and starts
