@@ -2,14 +2,14 @@
 """
 Hermes Agent HF Spaces Persistence — Full Directory Sync
 =========================================================
-- Startup:  snapshot_download  →  /opt/data
-- Periodic: upload_folder      →  dataset hermes_data/
-- Shutdown: final upload_folder →  dataset hermes_data/
+- Startup:  snapshot_download  ->  /opt/data
+- Periodic: upload_folder      ->  dataset hermes_data/
+- Shutdown: final upload_folder ->  dataset hermes_data/
 
-config 策略:
-- model:     不在脚本写死,交给面板 / 持久化的 config.yaml
-- telegram:  base_url 每次启动强制 merge(对齐 CLOUDFLARE_PROXY_URL)
-- dashboard: basic-auth 通过官方 env 注入(新版 Hermes 强制要求)
+config strategy:
+- model:     not hardcoded; left to dashboard / persisted config.yaml
+- telegram:  base_url force-merged each boot (aligned with CLOUDFLARE_PROXY_URL)
+- dashboard: basic-auth injected via official env vars (required by new Hermes)
 """
 
 import os
@@ -37,7 +37,7 @@ _logging.getLogger("filelock").setLevel(_logging.WARNING)
 from huggingface_hub import HfApi, snapshot_download
 
 
-# ── Logging helper ──────────────────────────────────────────────────────────
+# -- Logging helper ----------------------------------------------------------
 
 class TeeLogger:
     """Duplicate output to stream and file."""
@@ -58,7 +58,7 @@ class TeeLogger:
         return self.stream.fileno()
 
 
-# ── Configuration ───────────────────────────────────────────────────────────
+# -- Configuration -----------------------------------------------------------
 
 HF_TOKEN     = os.environ.get("HF_TOKEN")
 HERMES_DATA  = Path("/opt/data")
@@ -76,13 +76,13 @@ AUTO_CREATE_DATASET = os.environ.get("AUTO_CREATE_DATASET", "true").lower() in (
 HF_REPO_ID = os.environ.get("HERMES_DATASET_REPO", "")
 if not HF_REPO_ID and SPACE_ID:
     HF_REPO_ID = f"{SPACE_ID}-data"
-    print(f"[SYNC] HERMES_DATASET_REPO not set — auto-derived from SPACE_ID: {HF_REPO_ID}")
+    print(f"[SYNC] HERMES_DATASET_REPO not set - auto-derived from SPACE_ID: {HF_REPO_ID}")
 elif not HF_REPO_ID and HF_TOKEN:
     try:
         _api = HfApi(token=HF_TOKEN)
         _username = _api.whoami()["name"]
         HF_REPO_ID = f"{_username}/HermesFace-data"
-        print(f"[SYNC] HERMES_DATASET_REPO not set — auto-derived from HF_TOKEN: {HF_REPO_ID}")
+        print(f"[SYNC] HERMES_DATASET_REPO not set - auto-derived from HF_TOKEN: {HF_REPO_ID}")
         del _api, _username
     except Exception as e:
         print(f"[SYNC] WARNING: Could not derive username from HF_TOKEN: {e}")
@@ -94,7 +94,7 @@ sys.stdout = TeeLogger(log_dir / "sync.log", sys.stdout)
 sys.stderr = sys.stdout
 
 
-# ── Sync Manager ────────────────────────────────────────────────────────────
+# -- Sync Manager ------------------------------------------------------------
 
 class HermesFullSync:
     """Upload/download the entire /opt/data directory to HF Dataset."""
@@ -117,7 +117,7 @@ class HermesFullSync:
         self.api = HfApi(token=HF_TOKEN)
         self.dataset_exists = self._ensure_repo_exists()
 
-    # ── Repo management ────────────────────────────────────────────────
+    # -- Repo management ----------------------------------------------------
 
     def _ensure_repo_exists(self):
         try:
@@ -130,7 +130,7 @@ class HermesFullSync:
                 print("[SYNC]   Set AUTO_CREATE_DATASET=true to auto-create.")
                 print("[SYNC] Persistence disabled (app will still run normally).")
                 return False
-            print(f"[SYNC] Dataset repo NOT found: {HF_REPO_ID} — creating...")
+            print(f"[SYNC] Dataset repo NOT found: {HF_REPO_ID} - creating...")
             try:
                 self.api.create_repo(repo_id=HF_REPO_ID, repo_type="dataset", private=True)
                 print(f"[SYNC] Dataset repo created: {HF_REPO_ID}")
@@ -139,7 +139,7 @@ class HermesFullSync:
                 print(f"[SYNC] Failed to create dataset repo: {e}")
                 return False
 
-    # ── Restore (startup) ─────────────────────────────────────────────
+    # -- Restore (startup) --------------------------------------------------
 
     def load_from_repo(self):
         if not self.enabled:
@@ -192,7 +192,7 @@ class HermesFullSync:
         self._ensure_default_config()
         self._debug_list_files()
 
-    # ── Save (periodic + shutdown) ─────────────────────────────────────
+    # -- Save (periodic + shutdown) -----------------------------------------
 
     def save_to_repo(self):
         if not self.enabled:
@@ -205,7 +205,7 @@ class HermesFullSync:
             print(f"[SYNC] Dataset {HF_REPO_ID} unavailable - skipping save")
             return
 
-        print(f"[SYNC] Uploading /opt/data → dataset {HF_REPO_ID}/{DATASET_PATH}/ ...")
+        print(f"[SYNC] Uploading /opt/data -> dataset {HF_REPO_ID}/{DATASET_PATH}/ ...")
 
         try:
             total_size = 0
@@ -227,7 +227,7 @@ class HermesFullSync:
                 repo_id=HF_REPO_ID,
                 repo_type="dataset",
                 token=HF_TOKEN,
-                commit_message=f"Sync hermes_data — {datetime.now().isoformat()}",
+                commit_message=f"Sync hermes_data - {datetime.now().isoformat()}",
                 ignore_patterns=[
                     "*.log", "*.lock", "*.tmp", "*.pid",
                     "__pycache__", ".cache/**",
@@ -247,20 +247,20 @@ class HermesFullSync:
             print(f"[SYNC] Upload failed: {e}")
             traceback.print_exc()
 
-    # ── Config helpers ─────────────────────────────────────────────────
+    # -- Config helpers -----------------------------------------------------
 
     def _ensure_default_config(self):
         """
-        config.yaml / .env / SOUL.md 兜底 + Telegram 代理强制对齐。
-        - model:     不写死,交给面板 / 持久化 config.yaml
-        - telegram:  base_url 每次启动强制 merge
+        Bootstrap config.yaml / .env / SOUL.md + force-align Telegram proxy.
+        - model:     not hardcoded; left to dashboard / persisted config.yaml
+        - telegram:  base_url force-merged each boot
         """
         import yaml
         config_path = HERMES_DATA / "config.yaml"
         env_path = HERMES_DATA / ".env"
         soul_path = HERMES_DATA / "SOUL.md"
 
-        # 1. config.yaml 兜底(仅 fresh 首启)
+        # 1. config.yaml bootstrap (fresh first boot only)
         if not config_path.exists():
             template = APP_DIR / "cli-config.yaml.example"
             if template.exists():
@@ -274,9 +274,9 @@ class HermesFullSync:
                 with open(config_path, "w") as f:
                     yaml.dump(config, f, default_flow_style=False)
                 print(f"[SYNC] Created minimal config.yaml (agent={AGENT_NAME}, port=7860)")
-                # 故意不写 model —— 交给面板设置
+                # intentionally NO model here - left to dashboard
 
-        # 2. Telegram 代理:每次启动强制 merge
+        # 2. Telegram proxy: force-merge each boot
         _tg_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
         _proxy = os.environ.get("CLOUDFLARE_PROXY_URL", "").rstrip("/")
         if _tg_token and _proxy:
@@ -293,10 +293,10 @@ class HermesFullSync:
             except Exception as e:
                 print(f"[SYNC] WARNING: failed to merge telegram proxy config: {e}")
         elif _tg_token and not _proxy:
-            print("[SYNC] TELEGRAM_BOT_TOKEN set but CLOUDFLARE_PROXY_URL empty — "
+            print("[SYNC] TELEGRAM_BOT_TOKEN set but CLOUDFLARE_PROXY_URL empty - "
                   "relying on DoH DNS direct connection (no proxy merge)")
 
-        # 3. .env 兜底(仅不存在时)
+        # 3. .env bootstrap (only when missing)
         if not env_path.exists():
             template = APP_DIR / ".env.example"
             if template.exists():
@@ -314,24 +314,23 @@ class HermesFullSync:
                         env_lines.append(f"{key}={val}")
                 if env_lines:
                     with open(env_path, "w") as f:
-                        f.write("
-".join(env_lines) + "
-")
+                        f.write("\n".join(env_lines) + "\n")
                     print(f"[SYNC] Created .env with {len(env_lines)} keys")
 
-        # 4. SOUL.md 兜底
+        # 4. SOUL.md bootstrap
         if not soul_path.exists():
             template = APP_DIR / "docker" / "SOUL.md"
             if template.exists():
                 shutil.copy2(str(template), str(soul_path))
                 print("[SYNC] Created SOUL.md from Hermes template")
             else:
+                soul_text = (
+                    f"# {AGENT_NAME}\n\n"
+                    f"I am {AGENT_NAME}, a self-improving AI assistant "
+                    f"powered by Hermes Agent.\n"
+                )
                 with open(soul_path, "w") as f:
-                    f.write(f"# {AGENT_NAME}
-
-I am {AGENT_NAME}, "
-                            f"a self-improving AI assistant powered by Hermes Agent.
-")
+                    f.write(soul_text)
                 print("[SYNC] Created default SOUL.md")
 
     def _debug_list_files(self):
@@ -341,7 +340,7 @@ I am {AGENT_NAME}, "
         except Exception as e:
             print(f"[SYNC] listing failed: {e}")
 
-    # ── Background sync loop ──────────────────────────────────────────
+    # -- Background sync loop ------------------------------------------------
 
     def background_sync_loop(self, stop_event):
         print(f"[SYNC] Background sync started (interval={SYNC_INTERVAL}s)")
@@ -351,7 +350,7 @@ I am {AGENT_NAME}, "
             print(f"[SYNC] Periodic sync triggered at {datetime.now().isoformat()}")
             self.save_to_repo()
 
-    # ── Web server CORS patch ─────────────────────────────────────────
+    # -- Web server CORS patch ----------------------------------------------
 
     def _patch_web_server_cors(self):
         ws_path = APP_DIR / "hermes_cli" / "web_server.py"
@@ -404,7 +403,7 @@ I am {AGENT_NAME}, "
                         if not stripped:
                             continue
                         if any(skip in stripped for skip in [
-                            "Downloading", "Fetching", "%|", "━", "───",
+                            "Downloading", "Fetching", "%|", "\u2501", "\u2500\u2500\u2500",
                             "Already cached", "Using cache", "tokenizer",
                             ".safetensors", "model-", "shard",
                         ]):
@@ -443,9 +442,9 @@ I am {AGENT_NAME}, "
         env.pop("API_SERVER_ENABLED", None)
         env.pop("API_SERVER_PORT", None)
 
-        # ── Dashboard basic-auth(新版 Hermes 强制要求,否则拒绝绑定 0.0.0.0)──
-        # 明文密码由 Hermes 在加载时内存哈希,无需自己算 scrypt。
-        # SECRET 必须固定,否则每次重启都掉登录。
+        # -- Dashboard basic-auth (required by new Hermes; else refuses 0.0.0.0) --
+        # Plaintext password is hashed in-memory by Hermes; no scrypt needed.
+        # SECRET must be stable, otherwise every restart logs you out.
         _dash_pass = (os.environ.get("DASHBOARD_PASSWORD")
                       or os.environ.get("GATEWAY_TOKEN", ""))
         if _dash_pass:
@@ -457,12 +456,12 @@ I am {AGENT_NAME}, "
             print("[SYNC] Dashboard basic-auth enabled via env "
                   f"(user={env['HERMES_DASHBOARD_BASIC_AUTH_USERNAME']})")
         else:
-            print("[SYNC] WARNING: no GATEWAY_TOKEN/DASHBOARD_PASSWORD set — "
+            print("[SYNC] WARNING: no GATEWAY_TOKEN/DASHBOARD_PASSWORD set - "
                   "dashboard will refuse to bind 0.0.0.0 and exit!")
 
         self._patch_web_server_cors()
 
-        # 注意:已删除 --insecure(它在新版会触发 SPA 无限重定向 bug #34398)
+        # NOTE: --insecure removed (triggers SPA infinite-redirect bug #34398 on new Hermes)
         dashboard_cmd = [hermes_bin, "dashboard", "--host", "0.0.0.0",
                          "--port", "7860", "--no-open"]
         print("[SYNC] Starting web dashboard on port 7860...")
@@ -482,7 +481,7 @@ I am {AGENT_NAME}, "
         return dashboard_proc
 
 
-# ── Main ────────────────────────────────────────────────────────────────────
+# -- Main --------------------------------------------------------------------
 
 def main():
     try:
@@ -506,8 +505,7 @@ def main():
         print(f"[TIMER] Total startup: {time.time() - t_main_start:.1f}s")
 
         def handle_signal(sig, frame):
-            print(f"
-[SYNC] Signal {sig} received. Shutting down...")
+            print(f"\n[SYNC] Signal {sig} received. Shutting down...")
             stop_event.set()
             t.join(timeout=10)
             if getattr(sync, "gateway_proc", None):
