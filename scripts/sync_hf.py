@@ -279,27 +279,81 @@ class HermesFullSync:
         env_path = HERMES_DATA / ".env"
         soul_path = HERMES_DATA / "SOUL.md"
 
-        # Bootstrap from Hermes templates if available
-        if not config_path.exists():
+        import yaml
+
+        # ── 1. Load or create config.yaml ──────────────────────────────
+        config = {}
+        if config_path.exists():
+            try:
+                with open(config_path, "r", encoding="utf-8") as f:
+                    config = yaml.safe_load(f) or {}
+                print("[SYNC] Loaded existing config.yaml")
+            except Exception as e:
+                print(f"[SYNC] Failed to load config.yaml (will recreate): {e}")
+                config = {}
+        else:
+            # Try to bootstrap from Hermes template
             template = APP_DIR / "cli-config.yaml.example"
             if template.exists():
                 shutil.copy2(str(template), str(config_path))
                 print("[SYNC] Created config.yaml from Hermes template")
-            else:
-                # Minimal fallback config
-                import yaml
-                config = {
-                    "agent": {"name": AGENT_NAME},
-                    "model": {
-                        "provider": "openrouter",
-                        "default": "deepseek/deepseek-chat-v3.1:free",
-                    },
-                    "server": {"host": "0.0.0.0", "port": 7860},
-                }
-                with open(config_path, "w") as f:
-                    yaml.dump(config, f, default_flow_style=False)
-                print(f"[SYNC] Created minimal config.yaml (agent={AGENT_NAME}, port=7860)")
+                try:
+                    with open(config_path, "r", encoding="utf-8") as f:
+                        config = yaml.safe_load(f) or {}
+                except Exception:
+                    config = {}
 
+        # ── 2. Always apply/overwrite core settings ─────────────────────
+        config.setdefault("agent", {})
+        config["agent"]["name"] = AGENT_NAME
+
+        config.setdefault("model", {})
+        config["model"].setdefault("provider", "openrouter")
+        config["model"].setdefault("default", "deepseek/deepseek-chat-v3.1:free")
+
+        config.setdefault("server", {})
+        config["server"]["host"] = "0.0.0.0"
+        config["server"]["port"] = 7860
+
+        # ── 3. Telegram platform + proxy config (HuggingMes pattern) ───
+        # Read proxy URL: prefer TELEGRAM_API_BASE_URL (already set in HF Secrets),
+        # fall back to CLOUDFLARE_PROXY_URL.
+        tg_token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+        proxy_url = os.environ.get("TELEGRAM_API_BASE_URL", "").strip()
+        if not proxy_url:
+            proxy_url = os.environ.get("CLOUDFLARE_PROXY_URL", "").strip()
+
+        if tg_token:
+            platforms = config.setdefault("platforms", {})
+            telegram = platforms.setdefault("telegram", {})
+            telegram["enabled"] = True
+
+            if proxy_url:
+                proxy_url = proxy_url.rstrip("/")
+                extra = telegram.setdefault("extra", {})
+                extra["base_url"] = proxy_url + "/bot"
+                extra["base_file_url"] = proxy_url + "/file/bot"
+                print(f"[SYNC] Telegram proxy configured: {proxy_url}/bot")
+            else:
+                print("[SYNC] Telegram enabled but no proxy URL set (direct connection).")
+
+            # Allowed users whitelist
+            allowed_users = os.environ.get("TELEGRAM_ALLOWED_USERS", "").strip()
+            if allowed_users:
+                config.setdefault("telegram", {}).setdefault("allow_from", [
+                    u.strip() for u in allowed_users.split(",") if u.strip()
+                ])
+
+        # ── 4. Write config.yaml ────────────────────────────────────────
+        try:
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(config_path, "w", encoding="utf-8") as f:
+                yaml.dump(config, f, default_flow_style=False, allow_unicode=True)
+            print(f"[SYNC] config.yaml saved (agent={AGENT_NAME}, port=7860)")
+        except Exception as e:
+            print(f"[SYNC] Failed to write config.yaml: {e}")
+
+        # ── 5. .env ─────────────────────────────────────────────────────
         if not env_path.exists():
             template = APP_DIR / ".env.example"
             if template.exists():
@@ -320,6 +374,7 @@ class HermesFullSync:
                         f.write("\n".join(env_lines) + "\n")
                     print(f"[SYNC] Created .env with {len(env_lines)} keys")
 
+        # ── 6. SOUL.md ──────────────────────────────────────────────────
         if not soul_path.exists():
             template = APP_DIR / "docker" / "SOUL.md"
             if template.exists():
