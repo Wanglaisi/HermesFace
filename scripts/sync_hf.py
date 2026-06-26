@@ -273,120 +273,89 @@ class HermesFullSync:
 
     # ── Config helpers ─────────────────────────────────────────────────
 
-    def _ensure_default_config(self):
-        """Ensure Hermes has config.yaml and .env for HF Spaces."""
-        config_path = HERMES_DATA / "config.yaml"
-        env_path = HERMES_DATA / ".env"
-        soul_path = HERMES_DATA / "SOUL.md"
+def _ensure_default_config(self):
+    """
+    config.yaml / .env / SOUL.md 兜底 + Telegram 代理强制对齐。
 
-        import yaml
+    设计原则:
+    - model:  不在脚本里写死。fresh 首启用 Hermes 模板兜底,
+              之后一律以面板设置 / 持久化的 config.yaml 为准。
+    - telegram base_url: 每次启动强制 merge(不是 "不存在才写"),
+              保证 CF 反代地址始终与当前 CLOUDFLARE_PROXY_URL 对齐。
+    """
+    import yaml
+    config_path = HERMES_DATA / "config.yaml"
+    env_path = HERMES_DATA / ".env"
+    soul_path = HERMES_DATA / "SOUL.md"
 
-        # ── 1. Load or create config.yaml ──────────────────────────────
-        config = {}
-        if config_path.exists():
-            try:
-                with open(config_path, "r", encoding="utf-8") as f:
-                    config = yaml.safe_load(f) or {}
-                print("[SYNC] Loaded existing config.yaml")
-            except Exception as e:
-                print(f"[SYNC] Failed to load config.yaml (will recreate): {e}")
-                config = {}
+    # ── 1. config.yaml 兜底(仅 fresh 首启)──────────────────────
+    if not config_path.exists():
+        template = APP_DIR / "cli-config.yaml.example"
+        if template.exists():
+            shutil.copy2(str(template), str(config_path))
+            print("[SYNC] Created config.yaml from Hermes template")
         else:
-            # Try to bootstrap from Hermes template
-            template = APP_DIR / "cli-config.yaml.example"
-            if template.exists():
-                shutil.copy2(str(template), str(config_path))
-                print("[SYNC] Created config.yaml from Hermes template")
-                try:
-                    with open(config_path, "r", encoding="utf-8") as f:
-                        config = yaml.safe_load(f) or {}
-                except Exception:
-                    config = {}
+            config = {
+                "agent": {"name": AGENT_NAME},
+                "server": {"host": "0.0.0.0", "port": 7860},
+            }
+            with open(config_path, "w") as f:
+                yaml.dump(config, f, default_flow_style=False)
+            print(f"[SYNC] Created minimal config.yaml (agent={AGENT_NAME}, port=7860)")
+            # 注意:这里故意不写 model —— 交给面板设置
 
-        # ── 2. Always apply/overwrite core settings ─────────────────────
-        config.setdefault("agent", {})
-        config["agent"]["name"] = AGENT_NAME
-
-        config.setdefault("model", {})
-        config["model"].setdefault("provider", "openrouter")
-        config["model"].setdefault("default", "deepseek/deepseek-chat-v3.1:free")
-
-        config.setdefault("server", {})
-        config["server"]["host"] = "0.0.0.0"
-        config["server"]["port"] = 7860
-
-        # ── 3. Telegram platform + proxy config (HuggingMes pattern) ───
-        # Read proxy URL: prefer TELEGRAM_API_BASE_URL (already set in HF Secrets),
-        # fall back to CLOUDFLARE_PROXY_URL.
-        tg_token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
-        proxy_url = os.environ.get("TELEGRAM_API_BASE_URL", "").strip()
-        if not proxy_url:
-            proxy_url = os.environ.get("CLOUDFLARE_PROXY_URL", "").strip()
-
-        if tg_token:
-            platforms = config.setdefault("platforms", {})
-            telegram = platforms.setdefault("telegram", {})
-            telegram["enabled"] = True
-
-            if proxy_url:
-                proxy_url = proxy_url.rstrip("/")
-                extra = telegram.setdefault("extra", {})
-                extra["base_url"] = proxy_url + "/bot"
-                extra["base_file_url"] = proxy_url + "/file/bot"
-                print(f"[SYNC] Telegram proxy configured: {proxy_url}/bot")
-            else:
-                print("[SYNC] Telegram enabled but no proxy URL set (direct connection).")
-
-            # Allowed users whitelist
-            allowed_users = os.environ.get("TELEGRAM_ALLOWED_USERS", "").strip()
-            if allowed_users:
-                config.setdefault("telegram", {}).setdefault("allow_from", [
-                    u.strip() for u in allowed_users.split(",") if u.strip()
-                ])
-
-        # ── 4. Write config.yaml ────────────────────────────────────────
+    # ── 2. Telegram 代理:每次启动强制 merge ────────────────────
+    _tg_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+    _proxy = os.environ.get("CLOUDFLARE_PROXY_URL", "").rstrip("/")
+    if _tg_token and _proxy:
         try:
-            config_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(config_path, "w", encoding="utf-8") as f:
-                yaml.dump(config, f, default_flow_style=False, allow_unicode=True)
-            print(f"[SYNC] config.yaml saved (agent={AGENT_NAME}, port=7860)")
+            cfg = yaml.safe_load(config_path.read_text()) or {}
+            tg = cfg.setdefault("platforms", {}).setdefault("telegram", {})
+            tg["enabled"] = True
+            tg["extra"] = {
+                "base_url": f"{_proxy}/bot",
+                "base_file_url": f"{_proxy}/file/bot",
+            }
+            config_path.write_text(yaml.safe_dump(cfg, default_flow_style=False))
+            print(f"[SYNC] Telegram proxy merged into config.yaml: {_proxy}/bot")
         except Exception as e:
-            print(f"[SYNC] Failed to write config.yaml: {e}")
+            print(f"[SYNC] WARNING: failed to merge telegram proxy config: {e}")
+    elif _tg_token and not _proxy:
+        print("[SYNC] TELEGRAM_BOT_TOKEN set but CLOUDFLARE_PROXY_URL empty — "
+              "relying on DoH DNS direct connection (no proxy merge)")
 
-        # ── 5. .env ─────────────────────────────────────────────────────
-        if not env_path.exists():
-            template = APP_DIR / ".env.example"
-            if template.exists():
-                shutil.copy2(str(template), str(env_path))
-                print("[SYNC] Created .env from Hermes template")
-            else:
-                env_lines = []
-                for key in [
-                    "OPENROUTER_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY",
-                    "NOUS_API_KEY", "GOOGLE_API_KEY", "MISTRAL_API_KEY",
-                    "TELEGRAM_BOT_TOKEN", "DISCORD_BOT_TOKEN", "SLACK_BOT_TOKEN",
-                ]:
-                    val = os.environ.get(key, "")
-                    if val:
-                        env_lines.append(f"{key}={val}")
-                if env_lines:
-                    with open(env_path, "w") as f:
-                        f.write("\n".join(env_lines) + "\n")
-                    print(f"[SYNC] Created .env with {len(env_lines)} keys")
+    # ── 3. .env 兜底(仅不存在时)────────────────────────────────
+    if not env_path.exists():
+        template = APP_DIR / ".env.example"
+        if template.exists():
+            shutil.copy2(str(template), str(env_path))
+            print("[SYNC] Created .env from Hermes template")
+        else:
+            env_lines = []
+            for key in [
+                "OPENROUTER_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY",
+                "NOUS_API_KEY", "GOOGLE_API_KEY", "MISTRAL_API_KEY",
+                "TELEGRAM_BOT_TOKEN", "DISCORD_BOT_TOKEN", "SLACK_BOT_TOKEN",
+            ]:
+                val = os.environ.get(key, "")
+                if val:
+                    env_lines.append(f"{key}={val}")
+            if env_lines:
+                with open(env_path, "w") as f:
+                    f.write("\n".join(env_lines) + "\n")
+                print(f"[SYNC] Created .env with {len(env_lines)} keys")
 
-        # ── 6. SOUL.md ──────────────────────────────────────────────────
-        if not soul_path.exists():
-            template = APP_DIR / "docker" / "SOUL.md"
-            if template.exists():
-                shutil.copy2(str(template), str(soul_path))
-                print("[SYNC] Created SOUL.md from Hermes template")
-            else:
-                with open(soul_path, "w") as f:
-                    f.write(
-                        f"# {AGENT_NAME}\n\n"
-                        f"I am {AGENT_NAME}, a self-improving AI assistant powered by Hermes Agent.\n"
-                    )
-                print("[SYNC] Created default SOUL.md")
+    # ── 4. SOUL.md 兜底 ─────────────────────────────────────────
+    if not soul_path.exists():
+        template = APP_DIR / "docker" / "SOUL.md"
+        if template.exists():
+            shutil.copy2(str(template), str(soul_path))
+            print("[SYNC] Created SOUL.md from Hermes template")
+        else:
+            with open(soul_path, "w") as f:
+                f.write(f"# {AGENT_NAME}\n\nI am {AGENT_NAME}, "
+                        f"a self-improving AI assistant powered by Hermes Agent.\n")
+            print("[SYNC] Created default SOUL.md")
 
     def _debug_list_files(self):
         try:
